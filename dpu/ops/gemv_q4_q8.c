@@ -1,0 +1,110 @@
+#include "gemv_q4_q8.h"
+#include <assert.h>
+#include <stdio.h>
+
+#define OP_GEMV_DEBUG_PRINT 0
+#ifndef SEGMENT_PER_ROW
+#define SEGMENT_PER_ROW 4
+#endif
+
+static __host int16_t mul_table_int4_int8[1 << 4][1 << 8];
+static __mram_ptr float *table_f32_f16 = NULL;
+
+static pim_tensor_des *src0 = NULL; // weight
+static pim_tensor_des *src1 = NULL; // input
+static pim_tensor_des *src2 = NULL; // table_f32_f16
+
+static __mram_ptr pim_block_q4_0 *weight_data_addr = NULL;
+static pim_block_q8_0 *input_cache_addr = NULL;
+static float *sumf = NULL;
+
+static float lookup_fp16_to_fp32(uint16_t f)
+{
+    uint16_t s;
+    memcpy(&s, &f, sizeof(uint16_t));
+    uint16_t alignedOffset;
+    float temp[8];
+
+    alignedOffset = s & 0xfff8;
+    mram_read((__mram_ptr void const *)(table_f32_f16 + alignedOffset), temp, sizeof(float) * 8);
+    return temp[s & 0x7];
+}
+
+#define FP16_TO_FP32(x) lookup_fp16_to_fp32(x)
+
+void gemv_q4_q8_prepare(msg_block_header *header_ptr)
+{
+    src0 = &header_ptr->src0;
+    assert(src0->ptr.dpu_id == ALL_DPU);
+    weight_data_addr = (__mram_ptr pim_block_q4_0 *)(DPU_MRAM_HEAP_POINTER + src0->ptr.dpu_addr);
+    src1 = &header_ptr->src1;
+    input_cache_addr = (pim_block_q8_0 *)((char *)header_ptr + sizeof(msg_block_header));
+    src2 = &header_ptr->src2;
+    table_f32_f16 = (__mram_ptr float *)(DPU_MRAM_HEAP_POINTER + src2->ptr.dpu_addr);
+
+#if OP_GEMV_DEBUG_PRINT
+    printf("src0.dpu_addr: %d, ne0: %d, ne1: %d\n", src0->ptr.dpu_addr,
+           src0->ne[0], src0->ne[1]);
+    printf("src1.dpu_addr: %d, ne0: %d, ne1: %d\n", src1->ptr.dpu_addr,
+           src1->ne[0], src1->ne[1]);
+    printf("src2.dpu_addr: %d\n", src2->ptr.dpu_addr);
+#endif
+
+    assert(src0->ne[0] == src1->ne[0]);
+    assert(src1->ne[1] == 1 && "Only support vector as input.");
+    assert(src0->type == PIM_TYPE_Q4_0 && "Only support Q4_0 weight.");
+    assert(src1->type == PIM_TYPE_Q8_0 && "Only support Q8_0 input.");
+
+    sumf = (float *)mem_alloc(sizeof(float) * src0->ne[1]);
+    memset(sumf, 0, sizeof(float) * src0->ne[1]);
+}
+
+void gemv_q4_q8_tasklets_run()
+{
+    unsigned int tasklet_id = me();
+
+    uint32_t segments_num = src0->ne[1] * SEGMENT_PER_ROW;
+    uint32_t segment_start = BLOCK_LOW(tasklet_id, NR_TASKLETS, segments_num);
+    uint32_t segment_end = BLOCK_HIGH(tasklet_id, NR_TASKLETS, segments_num);
+
+    assert(segment_start <= segment_end && "There are not enough segments to allocate to the tasklets");
+
+    int qk = QK8_0;
+    uint32_t nb = src1->ne[0] / QK8_0;
+    uint32_t segment_nb_size = nb / SEGMENT_PER_ROW;
+    pim_block_q4_0 *pweight_cache = (pim_block_q4_0 *)mem_alloc(sizeof(pim_block_q4_0) * segment_nb_size);
+
+    for (int k = segment_start; k <= segment_end; ++k)
+    {
+        __mram_ptr pim_block_q4_0 *pweight = weight_data_addr + k * segment_nb_size;
+        mram2wram(pweight, pweight_cache, sizeof(pim_block_q4_0) * segment_nb_size);
+
+        pim_block_q8_0 *pinput_cache = input_cache_addr + k % SEGMENT_PER_ROW * segment_nb_size;
+
+        for (int i = 0; i < segment_nb_size; i++)
+        {
+            int sumi = 0;
+            for (int j = 0; j < qk / 2; ++j)
+            {
+                const int8_t v0 = (pweight_cache[i].qs[j] & 0x0F) - 8;
+                const int8_t v1 = (pweight_cache[i].qs[j] >> 4) - 8;
+
+                // sumi += (v0 * pinput_cache[i].qs[j]) + (v1 * pinput_cache[i].qs[j + qk/2]);
+                sumi += mul_table_int4_int8[v0 + 8][pinput_cache[i].qs[j] - INT8_MIN] +
+                        mul_table_int4_int8[v1 + 8][pinput_cache[i].qs[j + qk / 2] - INT8_MIN];
+            }
+
+            int sumf_idx = k / SEGMENT_PER_ROW;
+            float sum = sumi * FP16_TO_FP32(pweight_cache[i].d) * FP16_TO_FP32(pinput_cache[i].d);
+            buckets_mutex_lock(sumf_idx);
+            sumf[sumf_idx] += sum;
+            // g_psumf[psumf_idx] += sumi;
+            buckets_mutex_unlock(sumf_idx);
+        }
+    }
+}
+
+void gemv_q4_q8_merge()
+{
+    wram2mram((__mram_ptr void *)RESULT_BUFFER_ADDR, sumf, sizeof(float) * src0->ne[1]);
+}
