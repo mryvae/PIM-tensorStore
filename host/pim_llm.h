@@ -3,6 +3,7 @@
 
 #include "./msg/msg_comm.h"
 #include "./mm/pim_direct_comm.h"
+#include "timer.h"
 
 void dpu_set_launch(struct dpu_set_t dpu_set)
 {
