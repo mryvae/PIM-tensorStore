@@ -45,7 +45,7 @@ void msg_block_builder_op_gemv_q4_q8(msg_block_des *msg, remote_ptr w, int32_t w
     msg->header.src1.ptr.dpu_addr = DPU_EXTRA_PTR;
     
     msg->header.src2.ptr = table_f32_f16;
-    printf("%d\n",msg->header.src2.ptr.dpu_addr);
+    // printf("%d\n",msg->header.src2.ptr.dpu_addr);
 
     msg->extra = in_q_data;
     msg->extra_size = in_q_size;

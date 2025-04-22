@@ -98,7 +98,7 @@ void gemv_q4_q8_tasklets_run()
             float sum = sumi * FP16_TO_FP32(pweight_cache[i].d) * FP16_TO_FP32(pinput_cache[i].d);
             buckets_mutex_lock(sumf_idx);
             sumf[sumf_idx] += sum;
-            // g_psumf[psumf_idx] += sumi;
+            // sumf[sumf_idx] += sumi;
             buckets_mutex_unlock(sumf_idx);
         }
     }
