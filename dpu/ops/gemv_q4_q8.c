@@ -57,6 +57,9 @@ void gemv_q4_q8_prepare(msg_block_header *header_ptr)
 
     sumf = (float *)mem_alloc(sizeof(float) * src0->ne[1]);
     memset(sumf, 0, sizeof(float) * src0->ne[1]);
+#if OP_GEMV_DEBUG_PRINT
+    printf("sumf0: %f, sumf1: %f, sumf2: %f\n", sumf[0], sumf[1], sumf[2]);
+#endif
 }
 
 void gemv_q4_q8_tasklets_run()
@@ -67,20 +70,43 @@ void gemv_q4_q8_tasklets_run()
     uint32_t segment_start = BLOCK_LOW(tasklet_id, NR_TASKLETS, segments_num);
     uint32_t segment_end = BLOCK_HIGH(tasklet_id, NR_TASKLETS, segments_num);
 
+#if OP_GEMV_DEBUG_PRINT
+    if(tasklet_id == 0){
+        printf("segments_num: %d, segment_start: %d, segment_end: %d\n", segments_num,
+            segment_start, segment_end);
+    }
+#endif
+
     assert(segment_start <= segment_end && "There are not enough segments to allocate to the tasklets");
 
     int qk = QK8_0;
     uint32_t nb = src1->ne[0] / QK8_0;
+#if OP_GEMV_DEBUG_PRINT
+    if(tasklet_id == 0){
+        printf("input0: %d %d, input_last: %d %d\n", input_cache_addr[0].qs[0], 
+                input_cache_addr[0].qs[1], input_cache_addr[nb-1].qs[0], input_cache_addr[nb-1].qs[1]);
+    }
+#endif
+    assert(nb % SEGMENT_PER_ROW == 0);
     uint32_t segment_nb_size = nb / SEGMENT_PER_ROW;
-    pim_block_q4_0 *pweight_cache = (pim_block_q4_0 *)mem_alloc(sizeof(pim_block_q4_0) * segment_nb_size);
+    char *pweight_cache_align8 = (char *)mem_alloc(align8(sizeof(pim_block_q4_0) * segment_nb_size) + 8);
+    pim_block_q4_0 *pweight_cache = NULL;
 
     for (int k = segment_start; k <= segment_end; ++k)
     {
         __mram_ptr pim_block_q4_0 *pweight = weight_data_addr + k * segment_nb_size;
-        mram2wram(pweight, pweight_cache, sizeof(pim_block_q4_0) * segment_nb_size);
+        uintptr_t pweight_uint32 = (uintptr_t)pweight;
+        assert(pweight_uint32 % 4 == 0);
+        __mram_ptr char *pweight_align8 = (__mram_ptr char *)pweight - pweight_uint32 % 8;
+        mram2wram(pweight_align8, pweight_cache_align8, align8(sizeof(pim_block_q4_0) * segment_nb_size) + 8);
+        pweight_cache = (pim_block_q4_0 *)(pweight_cache_align8 + pweight_uint32 % 8);
 
         pim_block_q8_0 *pinput_cache = input_cache_addr + k % SEGMENT_PER_ROW * segment_nb_size;
-
+#if OP_GEMV_DEBUG_PRINT
+        printf("pweight: %p, pweight_uint32: %d, pweight_align8: %p, pweight_cache_align8: %p, pweight_cache: %p, pinput_cache: %p\n", 
+                pweight, pweight_uint32, pweight_align8, pweight_cache_align8, pweight_cache, pinput_cache);
+#endif
+        float sum = 0;
         for (int i = 0; i < segment_nb_size; i++)
         {
             int sumi = 0;
@@ -94,17 +120,24 @@ void gemv_q4_q8_tasklets_run()
                         mul_table_int4_int8[v1 + 8][pinput_cache[i].qs[j + qk / 2] - INT8_MIN];
             }
 
-            int sumf_idx = k / SEGMENT_PER_ROW;
-            float sum = sumi * FP16_TO_FP32(pweight_cache[i].d) * FP16_TO_FP32(pinput_cache[i].d);
-            buckets_mutex_lock(sumf_idx);
-            sumf[sumf_idx] += sum;
-            // sumf[sumf_idx] += sumi;
-            buckets_mutex_unlock(sumf_idx);
+            sum += sumi * FP16_TO_FP32(pweight_cache[i].d) * FP16_TO_FP32(pinput_cache[i].d);
         }
+        int sumf_idx = k / SEGMENT_PER_ROW;
+#if OP_GEMV_DEBUG_PRINT
+        printf("tasklet id: %d, segment of row: %d, sumf_idx: %d, sumf[sumf_idx]: %f, sum: %f\n", 
+                tasklet_id, k % SEGMENT_PER_ROW, sumf_idx, sumf[sumf_idx], sum);
+#endif
+        buckets_mutex_lock(sumf_idx);
+        sumf[sumf_idx] += sum;
+        // sumf[sumf_idx] += sumi;
+        buckets_mutex_unlock(sumf_idx);
     }
 }
 
 void gemv_q4_q8_merge()
 {
+#if OP_GEMV_DEBUG_PRINT
+        printf("sumf0: %f, sumf1: %f, sumf2: %f\n", sumf[0], sumf[1], sumf[2]);
+#endif
     wram2mram((__mram_ptr void *)RESULT_BUFFER_ADDR, sumf, sizeof(float) * src0->ne[1]);
 }

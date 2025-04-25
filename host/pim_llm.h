@@ -11,5 +11,6 @@ void dpu_set_launch(struct dpu_set_t dpu_set);
 void dpu_set_launch_async(struct dpu_set_t dpu_set);
 void dpu_set_wait(struct dpu_set_t dpu_set);
 void dpu_set_log_read(struct dpu_set_t dpu_set);
+void dpu_set_log_read_single_dpu(struct dpu_set_t dpu_set);
 
 #endif

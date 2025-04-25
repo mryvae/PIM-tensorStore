@@ -30,3 +30,16 @@ void dpu_set_log_read(struct dpu_set_t dpu_set)
         DPU_ASSERT(dpu_log_read(dpu, stdout));
     }
 }
+
+void dpu_set_log_read_single_dpu(struct dpu_set_t dpu_set)
+{
+    struct dpu_set_t dpu;
+    int dumped = 0;
+    DPU_FOREACH(dpu_set, dpu)
+    {
+        if(!dumped) {
+            DPU_ASSERT(dpu_log_read(dpu, stdout));
+            dumped = 1;
+        }
+    }
+}
