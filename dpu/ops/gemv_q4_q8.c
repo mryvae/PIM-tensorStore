@@ -122,20 +122,27 @@ void gemv_q4_q8_tasklets_run()
 
             sum += sumi * FP16_TO_FP32(pweight_cache[i].d) * FP16_TO_FP32(pinput_cache[i].d);
         }
-        int sumf_idx = k / SEGMENT_PER_ROW;
+        int row_idx = k / SEGMENT_PER_ROW;
+        // int segment_idx = k % SEGMENT_PER_ROW;
+        // sumf[segment_idx * src0->ne[1] + row_idx] += sum;
 #if OP_GEMV_DEBUG_PRINT
-        printf("tasklet id: %d, segment of row: %d, sumf_idx: %d, sumf[sumf_idx]: %f, sum: %f\n", 
-                tasklet_id, k % SEGMENT_PER_ROW, sumf_idx, sumf[sumf_idx], sum);
+        printf("tasklet id: %d, segment of row: %d, row_idx: %d, sumf[row_idx]: %f, sum: %f\n", 
+                tasklet_id, k % SEGMENT_PER_ROW, row_idx, sumf[row_idx], sum);
 #endif
-        buckets_mutex_lock(sumf_idx);
-        sumf[sumf_idx] += sum;
+        buckets_mutex_lock(row_idx);
+        sumf[row_idx] += sum;
         // sumf[sumf_idx] += sumi;
-        buckets_mutex_unlock(sumf_idx);
+        buckets_mutex_unlock(row_idx);
     }
 }
 
 void gemv_q4_q8_merge()
 {
+    // for(int i = 0; i < src0->ne[1]; i++){
+    //     for(int j = 1; j < SEGMENT_PER_ROW; j++){
+    //         sumf[i] += sumf[j * src0->ne[1] + i];
+    //     }
+    // }
 #if OP_GEMV_DEBUG_PRINT
         printf("sumf0: %f, sumf1: %f, sumf2: %f\n", sumf[0], sumf[1], sumf[2]);
 #endif
