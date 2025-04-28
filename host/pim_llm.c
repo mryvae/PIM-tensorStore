@@ -7,14 +7,13 @@ int64_t usec()
     return (((int64_t)tv.tv_sec) * 1000000) + tv.tv_usec;
 }
 
-void dpu_set_launch(struct dpu_set_t dpu_set)
+void dpu_set_launch(struct dpu_set_t dpu_set, bool async)
 {
-    DPU_ASSERT(dpu_launch(dpu_set, DPU_SYNCHRONOUS));
-}
-
-void dpu_set_launch_async(struct dpu_set_t dpu_set)
-{
-    DPU_ASSERT(dpu_launch(dpu_set, DPU_ASYNCHRONOUS));
+    if(async) {
+        DPU_ASSERT(dpu_launch(dpu_set, DPU_ASYNCHRONOUS));
+    } else {
+        DPU_ASSERT(dpu_launch(dpu_set, DPU_SYNCHRONOUS));
+    }
 }
 
 void dpu_set_wait(struct dpu_set_t dpu_set)

@@ -46,7 +46,7 @@ void test_case_mm(void)
         src_ptrs[i] = nums[i];
     }
 
-    dpu_send_direct(dpu_set, ptr0, src_ptrs, sizeof(int32_t) * TEST_CASE_NR_DPUS);
+    dpu_send_direct(dpu_set, ptr0, src_ptrs, sizeof(int32_t) * TEST_CASE_NR_DPUS, false);
 
     int32_t *nums_copy = malloc(sizeof(int32_t) * TEST_CASE_NR_DPUS * TEST_CASE_NR_DPUS);
     void *dst_ptrs[TEST_CASE_NR_DPUS];
@@ -54,7 +54,7 @@ void test_case_mm(void)
     {
         dst_ptrs[i] = nums_copy + i * TEST_CASE_NR_DPUS;
     }
-    dpu_recv_direct(dpu_set, ptr0, dst_ptrs, TEST_CASE_NR_DPUS * sizeof(int32_t));
+    dpu_recv_direct(dpu_set, ptr0, dst_ptrs, TEST_CASE_NR_DPUS * sizeof(int32_t), false);
     cnt = 0;
     for (int i = 0; i < TEST_CASE_NR_DPUS * TEST_CASE_NR_DPUS; i++)
     {
@@ -95,7 +95,7 @@ void test_case_msg(void)
         src_ptrs[i] = nums[i];
     }
 
-    dpu_send_direct(dpu_set, ptr0, src_ptrs, sizeof(int32_t) * TEST_CASE_NR_DPUS);
+    dpu_send_direct(dpu_set, ptr0, src_ptrs, sizeof(int32_t) * TEST_CASE_NR_DPUS, false);
 
     msg_block_des msg_add, msg_get;
     int32_t num = 100;
@@ -113,7 +113,7 @@ void test_case_msg(void)
     msg_buffer_dump_int32(&buffer);
 #endif
 
-    msg_buffer_send(&buffer, dpu_set);
+    msg_buffer_send(&buffer, dpu_set, false);
 
     DPU_ASSERT(dpu_launch(dpu_set, DPU_SYNCHRONOUS));
 
@@ -131,7 +131,7 @@ void test_case_msg(void)
     {
         dst_ptrs[i] = nums_copy + i * TEST_CASE_NR_DPUS;
     }
-    msg_buffer_recv(dpu_set, dst_ptrs, sizeof(int32_t) * TEST_CASE_NR_DPUS);
+    msg_buffer_recv(dpu_set, dst_ptrs, sizeof(int32_t) * TEST_CASE_NR_DPUS, false);
     cnt = 0;
     for (int i = 0; i < TEST_CASE_NR_DPUS * TEST_CASE_NR_DPUS; i++)
     {

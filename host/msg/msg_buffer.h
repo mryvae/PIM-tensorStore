@@ -27,5 +27,6 @@ void msg_buffer_clear(msg_buffer *builder);
 void msg_buffer_append(msg_buffer *builder, msg_block_des* msg_block);
 void msg_buffer_finish(msg_buffer *builder);
 void msg_buffer_dump_int32(msg_buffer *builder);
+void msg_buffer_free(msg_buffer *builder);
 
 #endif

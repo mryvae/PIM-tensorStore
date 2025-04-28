@@ -48,3 +48,8 @@ void msg_buffer_dump_int32(msg_buffer *builder)
     }
     printf("\n");
 }
+
+void msg_buffer_free(msg_buffer *builder)
+{
+    free(builder->buffer);
+}

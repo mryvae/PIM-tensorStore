@@ -4,7 +4,7 @@
 
 #define OP_GEMV_DEBUG_PRINT 0
 #ifndef SEGMENT_PER_ROW
-#define SEGMENT_PER_ROW 4
+#define SEGMENT_PER_ROW 1
 #endif
 
 static __host int16_t mul_table_int4_int8[1 << 4][1 << 8];
@@ -67,8 +67,8 @@ void gemv_q4_q8_tasklets_run()
     unsigned int tasklet_id = me();
 
     uint32_t segments_num = src0->ne[1] * SEGMENT_PER_ROW;
-    uint32_t segment_start = BLOCK_LOW(tasklet_id, NR_TASKLETS, segments_num);
-    uint32_t segment_end = BLOCK_HIGH(tasklet_id, NR_TASKLETS, segments_num);
+    int32_t segment_start = BLOCK_LOW(tasklet_id, NR_TASKLETS, segments_num);
+    int32_t segment_end = BLOCK_HIGH(tasklet_id, NR_TASKLETS, segments_num);
 
 #if OP_GEMV_DEBUG_PRINT
     if(tasklet_id == 0){
@@ -77,7 +77,10 @@ void gemv_q4_q8_tasklets_run()
     }
 #endif
 
-    assert(segment_start <= segment_end && "There are not enough segments to allocate to the tasklets");
+    if(segment_start > segment_end){
+        return;
+    }
+    // assert(segment_start <= segment_end && "There are not enough segments to allocate to the tasklets");
 
     int qk = QK8_0;
     uint32_t nb = src1->ne[0] / QK8_0;

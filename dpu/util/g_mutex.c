@@ -1,7 +1,7 @@
 #include "g_mutex.h"
 #include <mutex_pool.h>
 
-MUTEX_POOL_INIT(mutex_pool, NR_TASKLETS);
+MUTEX_POOL_INIT(mutex_pool, 16);
 
 void buckets_mutex_lock(uint32_t bucket_id)
 {
