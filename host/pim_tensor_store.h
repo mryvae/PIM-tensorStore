@@ -1,5 +1,5 @@
-#ifndef _PIM_LLM_H
-#define _PIM_LLM_H
+#ifndef _PIM_TENSOR_STORE_H
+#define _PIM_TENSOR_STORE_H
 
 #include "./msg/msg_comm.h"
 #include "./mm/pim_direct_comm.h"

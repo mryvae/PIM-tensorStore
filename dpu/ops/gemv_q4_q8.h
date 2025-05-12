@@ -3,11 +3,11 @@
 
 #include <mram.h>
 #include <defs.h>
-#include "../../host/msg/msg_block.h"
-#include "../../host/msg/msg_tensor.h"
-#include "../sto/mram_mm.h"
-#include "../sto/g_vars.h"
-#include "../util/g_mutex.h"
+#include "msg_block.h"
+#include "msg_tensor.h"
+#include "mram_mm.h"
+#include "g_vars.h"
+#include "g_mutex.h"
 
 void gemv_q4_q8_prepare(msg_block_header *header_ptr);
 void gemv_q4_q8_tasklets_run();

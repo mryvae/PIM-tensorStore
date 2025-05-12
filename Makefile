@@ -1,8 +1,8 @@
-BUILDDIR ?= build
+BINDIR ?= bin
 
-PIM_LLM_SO=${BUILDDIR}/libpim_llm.so
+PIM_LLM_SO=${BINDIR}/libpim_llm.so
 
-HOST_BINARY=${BUILDDIR}/host_app
+HOST_BINARY=${BINDIR}/host_app
 HOST_SOURCES=$(wildcard host/*.c)
 HOST_SOURCES+=$(wildcard host/mm/*.c)
 HOST_SOURCES+=$(wildcard host/msg/*.c)
@@ -10,7 +10,7 @@ HOST_HEADERS=$(wildcard host/*.h)
 HOST_HEADERS+=$(wildcard host/mm/*.h)
 HOST_HEADERS+=$(wildcard host/msg/*.h)
 
-DPU_BINARY=${BUILDDIR}/dpu_task
+DPU_BINARY=${BINDIR}/dpu_task
 DPU_SOURCES=$(wildcard dpu/*.c)
 DPU_SOURCES+=$(wildcard dpu/ops/*.c)
 DPU_SOURCES+=$(wildcard dpu/sto/*.c)
@@ -23,18 +23,21 @@ DPU_HEADERS+=$(wildcard dpu/util/*.h)
 UTIL_HEADERS=$(wildcard host/util/*.h)
 UTIL_SOURCES=$(wildcard host/util/*.c)
 
+DPU_INCLUDES=-Idpu/ops -Idpu/sto -Idpu/util -Ihost/util -Ihost/msg -Ihost/mm
+HOST_INCLUDES=-Ihost/util -Ihost/msg -Ihost/mm
+
 CHECK_FORMAT_FILES=${HOST_SOURCES} ${HOST_HEADERS} ${DPU_SOURCES} ${DPU_HEADERS} ${UTIL_HEADERS} ${UTIL_SOURCES}
 CHECK_FORMAT_DEPENDENCIES=$(addsuffix -check-format,${CHECK_FORMAT_FILES})
 
 NR_TASKLETS ?= 16
 
-__dirs := $(shell mkdir -p ${BUILDDIR})
+__dirs := $(shell mkdir -p ${BINDIR})
 
 .PHONY: all clean run plotdata check check-format 
 
 all: ${HOST_BINARY} ${DPU_BINARY} ${PIM_LLM_SO}
 clean:
-	rm -rf ${BUILDDIR}
+	rm -rf ${BINDIR}
 
 ###
 ### HOST APPLICATION
@@ -43,10 +46,10 @@ CFLAGS=-g -O3 -std=gnu99 -fgnu89-inline `dpu-pkg-config --cflags --libs dpu` -DN
 LDFLAGS=`dpu-pkg-config --libs dpu`
 
 ${HOST_BINARY}: ${HOST_SOURCES} ${HOST_HEADERS} ${UTIL_HEADERS} ${UTIL_SOURCES} ${DPU_BINARY}
-	$(CC) -o $@ ${HOST_SOURCES} ${UTIL_SOURCES} $(LDFLAGS) $(CFLAGS) -DDPU_BINARY=\"$(realpath ${DPU_BINARY})\"
+	$(CC) ${HOST_INCLUDES} -o $@ ${HOST_SOURCES} ${UTIL_SOURCES} $(LDFLAGS) $(CFLAGS) -DDPU_BINARY=\"$(realpath ${DPU_BINARY})\"
 
 ${PIM_LLM_SO}:
-	$(CC) -fPIC -shared -o $@ ${HOST_SOURCES} ${UTIL_SOURCES}  $(LDFLAGS) $(CFLAGS) 
+	$(CC) -fPIC -shared ${HOST_INCLUDES} -o $@ ${HOST_SOURCES} ${UTIL_SOURCES}  $(LDFLAGS) $(CFLAGS) 
 
 ###
 ### DPU BINARY
@@ -54,4 +57,4 @@ ${PIM_LLM_SO}:
 DPU_FLAGS=-g -O3 -fgnu89-inline -DNR_TASKLETS=${NR_TASKLETS} -DSTACK_SIZE_DEFAULT=1024
 
 ${DPU_BINARY}: ${DPU_SOURCES} ${DPU_HEADERS} ${UTIL_HEADERS} ${UTIL_SOURCES}
-	dpu-upmem-dpurte-clang ${DPU_FLAGS} ${DPU_SOURCES} ${UTIL_SOURCES} -o $@
+	dpu-upmem-dpurte-clang ${DPU_INCLUDES} ${DPU_FLAGS} ${DPU_SOURCES} ${UTIL_SOURCES} -o $@

@@ -3,7 +3,7 @@
 
 #include <mram.h>
 #include <alloc.h>
-#include "../../host/mm/pim_mm.h"
+#include "pim_mm.h"
 
 #ifndef NR_TASKLETS
 #define NR_TASKLETS 16

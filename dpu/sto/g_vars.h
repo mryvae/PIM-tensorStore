@@ -3,7 +3,7 @@
 
 #include <mram.h>
 #include <stdlib.h>
-#include "../../host/msg/msg_buffer.h"
+#include "msg_buffer.h"
 
 extern __host msg_buffer_header g_msg_header;
 extern __host char *g_msg_cache_ptr;
