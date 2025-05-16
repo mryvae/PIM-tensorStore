@@ -13,4 +13,6 @@ uint32_t align8(uint32_t s);
 
 uint32_t align2(uint32_t s);
 
+uint32_t align1024(uint32_t s);
+
 #endif

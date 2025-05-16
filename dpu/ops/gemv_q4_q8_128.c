@@ -1,4 +1,4 @@
-#include "gemv_q4_q8.h"
+#include "gemv_q4_q8_128.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -12,8 +12,8 @@ static pim_tensor_des *src0 = NULL; // weight
 static pim_tensor_des *src1 = NULL; // input
 static pim_tensor_des *src2 = NULL; // table_f32_f16
 
-static __mram_ptr pim_block_q4_0 *weight_data_addr = NULL;
-static pim_block_q8_0 *input_cache_addr = NULL;
+static __mram_ptr pim_block_q4_0_128 *weight_data_addr = NULL;
+static pim_block_q8_0_128 *input_cache_addr = NULL;
 static float *sumf = NULL;
 
 static float lookup_fp16_to_fp32(uint16_t f)
@@ -30,13 +30,13 @@ static float lookup_fp16_to_fp32(uint16_t f)
 
 #define FP16_TO_FP32(x) lookup_fp16_to_fp32(x)
 
-void gemv_q4_q8_prepare(msg_block_header *header_ptr)
+void gemv_q4_q8_128_prepare(msg_block_header *header_ptr)
 {
     src0 = &header_ptr->src0;
     assert(src0->ptr.dpu_id == ALL_DPU);
-    weight_data_addr = (__mram_ptr pim_block_q4_0 *)(DPU_MRAM_HEAP_POINTER + src0->ptr.dpu_addr);
+    weight_data_addr = (__mram_ptr pim_block_q4_0_128 *)(DPU_MRAM_HEAP_POINTER + src0->ptr.dpu_addr);
     src1 = &header_ptr->src1;
-    input_cache_addr = (pim_block_q8_0 *)((char *)header_ptr + sizeof(msg_block_header));
+    input_cache_addr = (pim_block_q8_0_128 *)((char *)header_ptr + sizeof(msg_block_header));
     src2 = &header_ptr->src2;
     table_f32_f16 = (__mram_ptr float *)(DPU_MRAM_HEAP_POINTER + src2->ptr.dpu_addr);
 
@@ -50,8 +50,8 @@ void gemv_q4_q8_prepare(msg_block_header *header_ptr)
 
     assert(src0->ne[0] == src1->ne[0]);
     assert(src1->ne[1] == 1 && "Only support vector as input.");
-    assert(src0->type == PIM_TYPE_Q4_0 && "Only support Q4_0 weight.");
-    assert(src1->type == PIM_TYPE_Q8_0 && "Only support Q8_0 input.");
+    assert(src0->type == PIM_TYPE_Q4_0_128 && "Only support Q4_0_128 weight.");
+    assert(src1->type == PIM_TYPE_Q8_0_128 && "Only support Q8_0_128 input.");
 
     sumf = (float *)mem_alloc(sizeof(float) * src0->ne[1]);
     memset(sumf, 0, sizeof(float) * src0->ne[1]);
@@ -60,7 +60,7 @@ void gemv_q4_q8_prepare(msg_block_header *header_ptr)
 #endif
 }
 
-void gemv_q4_q8_tasklets_run()
+void gemv_q4_q8_128_tasklets_run()
 {
     unsigned int tasklet_id = me();
 
@@ -82,8 +82,8 @@ void gemv_q4_q8_tasklets_run()
     }
     // assert(segment_start <= segment_end && "There are not enough segments to allocate to the tasklets");
 
-    int qk = QK8_0;
-    uint32_t nb = src1->ne[0] / QK8_0;
+    int qk = QK8_0_128;
+    uint32_t nb = src1->ne[0] / QK8_0_128;
 #if OP_GEMV_DEBUG_PRINT
     if (tasklet_id == 0)
     {
@@ -92,9 +92,17 @@ void gemv_q4_q8_tasklets_run()
     }
 #endif
     assert(nb % 2 == 0);
-    uint32_t segment_nb_size_max = nb / SEGMENT_PER_ROW + 1 + 1;
-    char *pweight_cache_align8 = (char *)mem_alloc(align8(sizeof(pim_block_q4_0) * segment_nb_size_max) + 8);
-    pim_block_q4_0 *pweight_cache = NULL;
+    uint32_t segment_nb_size_max;
+    if (nb % SEGMENT_PER_ROW == 0)
+    {
+        segment_nb_size_max = nb / SEGMENT_PER_ROW;
+    }
+    else
+    {
+        segment_nb_size_max = nb / SEGMENT_PER_ROW + 1 + 2;
+    }
+    char *pweight_cache_align8 = (char *)mem_alloc(align8(sizeof(pim_block_q4_0_128) * segment_nb_size_max) + 8);
+    pim_block_q4_0_128 *pweight_cache = NULL;
 
     for (int k = segment_start; k <= segment_end; ++k)
     {
@@ -102,18 +110,18 @@ void gemv_q4_q8_tasklets_run()
         int32_t segment_idx = k % SEGMENT_PER_ROW;
         int32_t segment_nb_start = BLOCK_LOW(segment_idx, SEGMENT_PER_ROW, nb) / 2 * 2;
         int32_t segment_nb_size = BLOCK_LOW(segment_idx + 1, SEGMENT_PER_ROW, nb) / 2 * 2 - segment_nb_start;
-        if(segment_nb_size <= 0)
+        if (segment_nb_size <= 0)
         {
             continue;
         }
-        __mram_ptr pim_block_q4_0 *pweight = weight_data_addr + row_idx * nb + segment_nb_start;
+        __mram_ptr pim_block_q4_0_128 *pweight = weight_data_addr + row_idx * nb + segment_nb_start;
         uintptr_t pweight_uint32 = (uintptr_t)pweight;
         assert(pweight_uint32 % 4 == 0);
         __mram_ptr char *pweight_align8 = (__mram_ptr char *)pweight - pweight_uint32 % 8;
-        mram2wram(pweight_align8, pweight_cache_align8, align8(sizeof(pim_block_q4_0) * segment_nb_size) + 8);
-        pweight_cache = (pim_block_q4_0 *)(pweight_cache_align8 + pweight_uint32 % 8);
+        mram2wram(pweight_align8, pweight_cache_align8, align8(sizeof(pim_block_q4_0_128) * segment_nb_size) + 8);
+        pweight_cache = (pim_block_q4_0_128 *)(pweight_cache_align8 + pweight_uint32 % 8);
 
-        pim_block_q8_0 *pinput_cache = input_cache_addr + segment_nb_start;
+        pim_block_q8_0_128 *pinput_cache = input_cache_addr + segment_nb_start;
 #if OP_GEMV_DEBUG_PRINT
         printf("pweight: %p, pweight_uint32: %d, pweight_align8: %p, pweight_cache_align8: %p, pweight_cache: %p, pinput_cache: %p\n",
                pweight, pweight_uint32, pweight_align8, pweight_cache_align8, pweight_cache, pinput_cache);
@@ -121,6 +129,10 @@ void gemv_q4_q8_tasklets_run()
         float sum = 0;
         for (int i = 0; i < segment_nb_size; i++)
         {
+            if(pinput_cache[i].d == 0 || pweight_cache[i].d == 0)
+            {
+                continue;
+            }
             int sumi = 0;
             for (int j = 0; j < qk / 2; ++j)
             {
@@ -147,7 +159,7 @@ void gemv_q4_q8_tasklets_run()
     }
 }
 
-void gemv_q4_q8_merge()
+void gemv_q4_q8_128_merge()
 {
     // for(int i = 0; i < src0->ne[1]; i++){
     //     for(int j = 1; j < SEGMENT_PER_ROW; j++){

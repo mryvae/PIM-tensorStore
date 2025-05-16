@@ -11,6 +11,7 @@
 #include "./sto/g_vars.h"
 #include "./sto/mram_mm.h"
 #include "./ops/gemv_q4_q8.h"
+#include "./ops/gemv_q4_q8_128.h"
 #include "./ops/tensor_add.h"
 
 #define DPU_MAIN_DEBUG_PRINT 0
@@ -74,6 +75,20 @@ int main()
             if (tasklet_id == 0)
             {
                 gemv_q4_q8_merge();
+            }
+            break;
+
+        case PIM_OP_GEMV_Q4_Q8_128:
+            if (tasklet_id == 0)
+            {
+                gemv_q4_q8_128_prepare(header_ptr);
+            }
+            barrier_wait(&my_barrier);
+            gemv_q4_q8_128_tasklets_run();
+            barrier_wait(&my_barrier);
+            if (tasklet_id == 0)
+            {
+                gemv_q4_q8_128_merge();
             }
             break;
 

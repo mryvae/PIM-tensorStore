@@ -13,3 +13,10 @@ uint32_t align2(uint32_t s)
         return ((s >> 1) + 1) << 1;
     return s;
 }
+
+uint32_t align1024(uint32_t s)
+{
+    if ((s & 0x3FF) == 0)
+        return s;
+    return ((s >> 10) + 1) << 10;
+}
