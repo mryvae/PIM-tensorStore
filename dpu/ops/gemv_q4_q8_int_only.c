@@ -7,30 +7,32 @@
 #define SEGMENT_PER_ROW 4
 #endif
 
-static __mram_ptr float *table_f32_f16 = NULL;
+static __mram_ptr pim_half_int8 *table_half_int8 = NULL;
 static pim_tensor_des *src0 = NULL; // weight
 static pim_tensor_des *src1 = NULL; // input
-static pim_tensor_des *src2 = NULL; // table_f32_f16
+static pim_tensor_des *src2 = NULL; // table_half_int8
 
 static __mram_ptr pim_block_q4_0 *weight_data_addr = NULL;
 static pim_block_q8_0 *input_cache_addr = NULL;
 static float *sumf = NULL;
+static int64_t *row_ms = NULL;
+static uint16_t *row_ks = NULL;
 
-static float lookup_fp16_to_fp32(uint16_t f)
+static pim_half_int8 lookup_fp16_to_half_int8(uint16_t f)
 {
     uint16_t s;
     memcpy(&s, &f, sizeof(uint16_t));
     uint16_t alignedOffset;
-    float temp[8];
+    __dma_aligned pim_half_int8 temp[8];
 
     alignedOffset = s & 0xfff8;
-    mram_read((__mram_ptr void const *)(table_f32_f16 + alignedOffset), temp, sizeof(float) * 8);
+    mram_read((__mram_ptr void const *)(table_half_int8 + alignedOffset), temp, sizeof(pim_half_int8) * 8);
     return temp[s & 0x7];
 }
 
-#define FP16_TO_FP32(x) lookup_fp16_to_fp32(x)
+#define FP16_TO_HALF_INT8(x) lookup_fp16_to_half_int8(x)
 
-void gemv_q4_q8_prepare(msg_block_header *header_ptr)
+void gemv_q4_q8_int_only_prepare(msg_block_header *header_ptr)
 {
     src0 = &header_ptr->src0;
     assert(src0->ptr.dpu_id == ALL_DPU);
@@ -38,7 +40,7 @@ void gemv_q4_q8_prepare(msg_block_header *header_ptr)
     src1 = &header_ptr->src1;
     input_cache_addr = (pim_block_q8_0 *)((char *)header_ptr + sizeof(msg_block_header));
     src2 = &header_ptr->src2;
-    table_f32_f16 = (__mram_ptr float *)(DPU_MRAM_HEAP_POINTER + src2->ptr.dpu_addr);
+    table_half_int8 = (__mram_ptr pim_half_int8 *)(DPU_MRAM_HEAP_POINTER + src2->ptr.dpu_addr);
 
 #if OP_GEMV_DEBUG_PRINT
     printf("src0.dpu_addr: %d, ne0: %d, ne1: %d\n", src0->ptr.dpu_addr,
@@ -54,13 +56,17 @@ void gemv_q4_q8_prepare(msg_block_header *header_ptr)
     assert(src1->type == PIM_TYPE_Q8_0 && "Only support Q8_0 input.");
 
     sumf = (float *)mem_alloc(sizeof(float) * src0->ne[1]);
+    row_ms = (int64_t *)mem_alloc(sizeof(int64_t) * src0->ne[1]);
+    row_ks = (uint16_t *)mem_alloc(sizeof(uint16_t) * src0->ne[1]);
     memset(sumf, 0, sizeof(float) * src0->ne[1]);
+    memset(row_ms, 0, sizeof(int64_t) * src0->ne[1]);
+    memset(row_ks, 0, sizeof(uint16_t) * src0->ne[1]);
 #if OP_GEMV_DEBUG_PRINT
     printf("sumf0: %f, sumf1: %f, sumf2: %f\n", sumf[0], sumf[1], sumf[2]);
 #endif
 }
 
-void gemv_q4_q8_tasklets_run()
+void gemv_q4_q8_int_only_tasklets_run_stage1()
 {
     unsigned int tasklet_id = me();
 
@@ -121,39 +127,46 @@ void gemv_q4_q8_tasklets_run()
         float sum = 0;
         for (int i = 0; i < segment_nb_size; i++)
         {
-            int sumi = 0;
+            int32_t sumi = 0;
             for (int j = 0; j < qk / 2; ++j)
             {
                 const int8_t v0 = (pweight_cache[i].qs[j] & 0x0F) - 8;
                 const int8_t v1 = (pweight_cache[i].qs[j] >> 4) - 8;
 
-                // sumi += (v0 * pinput_cache[i].qs[j]) + (v1 * pinput_cache[i].qs[j + qk/2]);
                 sumi += mul_table_int4_int8[v0 + 8][pinput_cache[i].qs[j] - INT8_MIN] +
                         mul_table_int4_int8[v1 + 8][pinput_cache[i].qs[j + qk / 2] - INT8_MIN];
             }
 
-            sum += sumi * FP16_TO_FP32(pweight_cache[i].d) * FP16_TO_FP32(pinput_cache[i].d);
+            pim_half_int8 half1 = FP16_TO_HALF_INT8(pweight_cache[i].d);
+            pim_half_int8 half2 = FP16_TO_HALF_INT8(pinput_cache[i].d);
+            int32_t block_m = sumi * half1.m * half2.m;
+            uint16_t block_k = (uint16_t)half1.k + half2.k;
+
+            buckets_mutex_lock(row_idx);
+            uint16_t mk = block_k;
+            int64_t block_m_int64 = (int64_t)block_m;
+            if (mk < row_ks[row_idx])
+            {
+                mk = row_ks[row_idx];
+            }
+            row_ms[row_idx] = (row_ms[row_idx] << (mk - row_ks[row_idx])) + (block_m_int64 << (mk - block_k));
+            row_ks[row_idx] = mk;
+            buckets_mutex_unlock(row_idx);
         }
-        // int segment_idx = k % SEGMENT_PER_ROW;
-        // sumf[segment_idx * src0->ne[1] + row_idx] += sum;
-#if OP_GEMV_DEBUG_PRINT
-        printf("tasklet id: %d, segment of row: %d, row_idx: %d, sumf[row_idx]: %f, sum: %f\n",
-               tasklet_id, k % SEGMENT_PER_ROW, row_idx, sumf[row_idx], sum);
-#endif
-        buckets_mutex_lock(row_idx);
-        sumf[row_idx] += sum;
-        // sumf[sumf_idx] += sumi;
-        buckets_mutex_unlock(row_idx);
     }
 }
 
-void gemv_q4_q8_merge()
+void gemv_q4_q8_int_only_tasklets_run_stage2()
 {
-    // for(int i = 0; i < src0->ne[1]; i++){
-    //     for(int j = 1; j < SEGMENT_PER_ROW; j++){
-    //         sumf[i] += sumf[j * src0->ne[1] + i];
-    //     }
-    // }
+    unsigned int tasklet_id = me();
+    for (int i = tasklet_id; i < src0->ne[1]; i += NR_TASKLETS)
+    {
+        sumf[i] = (float)row_ms[i] / ((int64_t)1 << row_ks[i]);
+    }
+}
+
+void gemv_q4_q8_int_only_merge()
+{
 #if OP_GEMV_DEBUG_PRINT
     printf("sumf0: %f, sumf1: %f, sumf2: %f\n", sumf[0], sumf[1], sumf[2]);
 #endif

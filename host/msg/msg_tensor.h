@@ -30,6 +30,13 @@ typedef ALIGN8 struct
 
 typedef uint16_t pim_half;
 
+// float d = m / (2^k)
+typedef struct
+{
+    int8_t m;
+    uint8_t k;
+} pim_half_int8;
+
 typedef struct
 {
     pim_half d;       // delta

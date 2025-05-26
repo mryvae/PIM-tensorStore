@@ -92,6 +92,22 @@ int main()
             }
             break;
 
+        case PIM_OP_GEMV_Q4_Q8_INT_ONLY:
+            if (tasklet_id == 0)
+            {
+                gemv_q4_q8_int_only_prepare(header_ptr);
+            }
+            barrier_wait(&my_barrier);
+            gemv_q4_q8_int_only_tasklets_run_stage1();
+            barrier_wait(&my_barrier);
+            gemv_q4_q8_int_only_tasklets_run_stage2();
+            barrier_wait(&my_barrier);
+            if (tasklet_id == 0)
+            {
+                gemv_q4_q8_int_only_merge();
+            }
+            break;
+
         case PIM_OP_TENSOR_ADD_FOR_TEST:
             if (tasklet_id == 0)
             {
